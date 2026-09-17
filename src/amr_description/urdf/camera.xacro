@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <xacro:include filename="properties.xacro" />
+
+    <material name="yellow">
+        <color rgba="1.0 1.0 0 1" />
+    </material>
+    
+    <link name="camera_link">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 1.57 0" />
+            <geometry>
+                <cylinder radius="0.012" length="0.01" />
+            </geometry>
+            <material name="yellow" />
+        </visual>
+
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <cylinder radius="0.012" length="0.01" />
+            </geometry>
+        </collision>
+
+        <xacro:cylinder_inertia m="0.05" r="0.012" h="0.01"
+                                    xyz="0 0 0" rpy="0 0 0" />
+    </link>
+
+    <link name="camera_link_optical" />
+
+    <!-- CAMERA JOINT -->
+    <joint name="camera_joint" type="fixed">
+        <parent link="amr_body" />
+        <child link="camera_link" />
+        <origin xyz="0.21 -0.04 0.195" rpy="0 0 0" />
+    </joint>
+
+    <!-- OPTICAL FRAME JOINT -->
+    <joint name="camera_optical_joint" type="fixed">
+        <parent link="camera_link" />
+        <child link="camera_link_optical" />
+        <origin xyz="0 0 0" rpy="-1.57 0 -1.57" />
+    </joint>
+    
+    <gazebo reference="camera_link">
+        <sensor name="camera" type="camera">
+            <camera>
+                <horizontal_fov>1.3962634</horizontal_fov>
+                <image>
+                    <width>640</width>
+                    <height>480</height>
+                    <format>R8G8B8</format>
+                </image>
+                <clip>
+                    <near>0.1</near>
+                    <far>15</far>
+                </clip>
+                <noise>
+                    <type>gaussian</type>
+                    <mean>0.0</mean>
+                    <stddev>0.007</stddev>
+                </noise>
+                <optical_frame_id>camera_link_optical</optical_frame_id>
+                <camera_info_topic>camera/camera_info</camera_info_topic>
+            </camera>
+            <always_on>1</always_on>
+            <update_rate>20</update_rate>
+            <visualize>true</visualize>
+            <topic>camera/image_raw</topic>            
+        </sensor>
+    </gazebo>
+</robot>

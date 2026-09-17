@@ -1,0 +1,194 @@
+<?xml version="1.0"?>
+<robot name="amr" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- robot_name namespaces every link/joint/frame/topic below so multiple
+         robot instances can share one TF tree and one Gazebo world without
+         colliding. Pass via `xacro amr_body.urdf.xacro.xml robot_name:=robot1`.
+         Default is empty so single-robot callers that never pass robot_name
+         (amr_bringup.launch.py, nav2_bringup.launch.py, slam.launch.py) get
+         back exactly the original, unprefixed names (base_link, /cmd_vel, ...). -->
+    <xacro:arg name="robot_name" default="" />
+    <xacro:property name="tf_prefix" value="$(arg robot_name)" />
+    <xacro:property name="prefix_" value="${tf_prefix + '/' if tf_prefix else ''}" />
+
+    <xacro:include filename="properties.xacro" />
+    <xacro:include filename="lidar.xacro" />
+    <xacro:include filename="amr_gazebo.xacro" />
+   
+
+
+    <!-- ==================================== LINKS ==================================== -->
+    <link name="${prefix_}base_link" />
+
+    <!-- ==================== AMR LINK ==================== -->
+    <link name="${prefix_}amr_body">
+        <visual>
+            <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+            <geometry>
+                <mesh filename="package://amr_description/meshes/AMR_Prototype_2.stl"
+                      scale="0.001 0.001 0.001" />  
+            </geometry>
+            <material name="amr_body_color" />
+        </visual>
+
+        <!--COLLISION TAG-->
+        <collision>
+            <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
+            <geometry>
+                <mesh filename="package://amr_description/meshes/AMR_Prototype_2.stl"
+                      scale="0.001 0.001 0.001" />  
+            </geometry>        
+        </collision>
+
+        <!--Inertial Tag-->
+        <xacro:box_inertia m="200.0" l="1.250" w="0.9" h="0.26"
+                            xyz="0.0 0.0 0.13" rpy="0.0 0.0 0.0" />
+    </link>
+
+    <!-- ==================== LIFT LINK ==================== -->
+     <link name="${prefix_}lift_link">
+        <visual>
+            <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+            <geometry>
+                <mesh filename="package://amr_description/meshes/Lift_mechanism.stl"
+                      scale="0.001 0.001 0.001" />  
+            </geometry>
+            <material name="amr_lift_color"/>
+        </visual>
+
+        <!--COLLISION TAG-->
+        <collision>
+            <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
+            <geometry>
+                <mesh filename="package://amr_description/meshes/Lift_mechanism.stl"
+                      scale="0.001 0.001 0.001" />  
+            </geometry>        
+        </collision>
+
+        <!--Inertial Tag-->
+        <xacro:cylinder_inertia m="20" r="0.1755" h="0.15"
+                              xyz="0.0 0.0 0.18" rpy="1.57 0.0 0.0" />
+    </link>
+
+    <!-- ==================== WHEEL MACRO ==================== -->
+    <xacro:macro name="wheel_link" params="prefix">
+        <link name="${prefix_}${prefix}_wheel">
+            <visual>
+                <origin xyz="0.0 0.0 0.0" rpy="1.57 0.0 0.0" />
+                <geometry>
+                    <cylinder radius="0.08" length="0.04" />
+                </geometry>
+                <material name="amr_wheel_color" />
+            </visual>
+
+            <!--COLLISION TAG-->
+            <collision>
+            <origin xyz="0.0 0.0 0.0" rpy="1.57 0.0 0.0" />
+            <geometry>
+                <cylinder radius="0.08" length="0.04" />
+            </geometry>
+        </collision>
+
+            <!--Inertial Tag-->
+            <xacro:cylinder_inertia m="20" r="0.08" h="0.04"
+                                    xyz="0 0 0" rpy="0 0 0" />
+        </link>
+    </xacro:macro>
+
+    <xacro:wheel_link prefix="l" />
+    <xacro:wheel_link prefix="r" />
+
+    <!-- ==================== CASTER MACRO ==================== -->
+    <xacro:macro name="caster_link" params="prefix">
+     <link name="${prefix_}${prefix}_caster">
+        <visual>
+            <geometry>
+                <sphere radius="0.0752" />
+            </geometry>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <material name="amr_caster_color" />
+        </visual>
+
+        <collision>
+            <geometry>
+                <sphere radius="0.0752" />
+            </geometry>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+        </collision>
+
+        <xacro:sphere_inertia m="1.0" r="0.0752" 
+                           o_xyz="0 0 0" o_rpy="0 0 0" />
+    </link>
+    </xacro:macro>
+
+    <xacro:caster_link prefix="lf" />
+    <xacro:caster_link prefix="rf" />
+    <xacro:caster_link prefix="rb" />
+    <xacro:caster_link prefix="lb" />
+
+    <!-- ==================================== JOINTS ==================================== -->
+
+    <!-- ==================== BASE-AMR ==================== -->
+    <joint name="${prefix_}base_amr_body" type="fixed">
+        <parent link="${prefix_}base_link" />
+        <child link="${prefix_}amr_body" />
+        <origin xyz="0 0 0.03" rpy="0 0 0" />
+    </joint>
+
+    <!-- ==================== AMR-LIFT-MECHANISM ==================== -->
+    <joint name="${prefix_}lift_amr_body" type="prismatic">
+        <parent link="${prefix_}amr_body" />
+        <child link="${prefix_}lift_link" />
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="0.0" upper="0.05" effort="2000" velocity="0.05"/>
+    </joint>
+
+    <!-- ==================== WHEEL - AMR ==================== -->
+    <!-- ======= LEFT WHEEL - AMR ======= -->
+    <joint name="${prefix_}l_wheel_amr" type="continuous">
+        <parent link="${prefix_}amr_body" />
+        <child link="${prefix_}l_wheel" />
+        <origin xyz="0.0 0.45 0.05" rpy="0 0 0" />
+        <axis xyz="0 1 0" />
+    </joint>
+
+    <!-- ======= RIGHT WHEEL - AMR ======= -->
+
+    <joint name="${prefix_}r_wheel_amr" type="continuous">
+        <parent link="${prefix_}amr_body" />
+        <child link="${prefix_}r_wheel" />
+        <origin xyz="0.0 -0.45 0.05" rpy="0 0 0" />
+        <axis xyz="0 1 0" />
+    </joint>
+
+    <!-- ==================== Caster WHEEL - AMR ==================== -->
+    <!-- ======= LF Caster - AMR ======= -->
+    <joint name="${prefix_}lf_caster_amr" type="fixed">
+        <parent link="${prefix_}amr_body" />
+        <child link="${prefix_}lf_caster" />
+        <origin xyz="0.345 0.295 0.0452" rpy="0 0 0" />
+    </joint>
+
+    <!-- ======= RF Caster - AMR ======= -->
+    <joint name="${prefix_}rf_caster_amr" type="fixed">
+        <parent link="${prefix_}amr_body" />
+        <child link="${prefix_}rf_caster" />
+        <origin xyz="0.345 -0.295 0.0452" rpy="0 0 0" />
+    </joint>
+
+    <!-- ======= LB Caster - AMR ======= -->
+    <joint name="${prefix_}lb_caster_amr" type="fixed">
+        <parent link="${prefix_}amr_body" />
+        <child link="${prefix_}lb_caster" />
+        <origin xyz="-0.345 0.295 0.0452" rpy="0 0 0" />
+    </joint>
+
+    <!-- ======= RB Caster - AMR ======= -->
+    <joint name="${prefix_}rb_caster_amr" type="fixed">
+        <parent link="${prefix_}amr_body" />
+        <child link="${prefix_}rb_caster" />
+        <origin xyz="-0.345 -0.295 0.0452" rpy="0 0 0" />
+    </joint>
+
+</robot>

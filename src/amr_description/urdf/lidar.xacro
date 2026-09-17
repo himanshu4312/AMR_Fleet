@@ -1,0 +1,63 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <link name="${prefix_}lidar_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.035"/>
+      </geometry>
+      <material name="transparent" />
+    </visual>
+
+    <!--Inertial Tag-->
+    <xacro:box_inertia m="0.16" l="0.06" w="0.06" h="0.08"
+                        xyz="0 0 0" rpy="0 0 0" />
+  </link>
+
+  <!-- ===== JOINT: attach to amr_body ===== -->
+
+  <joint name="${prefix_}lidar_joint" type="fixed">
+    <parent link="${prefix_}amr_body"/>
+    <child link="${prefix_}lidar_link"/>
+    <origin xyz="0.517 0.0 0.23" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="${prefix_}lidar_link">
+    <sensor name="gpu_lidar" type="gpu_lidar">
+      <pose>0 0 0 0 0 0</pose>
+      <always_on>true</always_on>
+      <update_rate>10</update_rate>
+      <visualize>true</visualize>
+      <topic>/${prefix_}scan</topic>
+      <gz_frame_id>${prefix_}lidar_link</gz_frame_id>
+      <ignition_frame_id>${prefix_}lidar_link</ignition_frame_id>
+      <lidar>
+        <scan>
+          <horizontal>
+            <samples>640</samples>
+            <resolution>1</resolution>
+            <min_angle>-2.18166</min_angle>
+            <max_angle>2.18166</max_angle>
+          </horizontal>
+          <vertical>
+            <samples>1</samples>
+            <min_angle>0</min_angle>
+            <max_angle>0</max_angle>
+          </vertical>
+        </scan>
+        <range>
+          <min>0.05</min>
+          <max>25.0</max>
+          <resolution>0.01</resolution>
+        </range>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.01</stddev>
+        </noise>
+      </lidar>
+    </sensor>
+  </gazebo>
+
+</robot>

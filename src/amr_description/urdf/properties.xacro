@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    
+    <material name="amr_body_color">
+        <color rgba="0.00 0.65 0.58 1.0"/> <!-- Teal -->
+    </material>
+
+    <material name="amr_wheel_color">
+        <color rgba="0.18 0.24 0.27 1.0"/> <!-- Charcoal -->
+    </material>
+
+    <material name="amr_lift_color">
+        <color rgba="1.00 0.54 0.25 1.0"/> <!-- Orange -->
+    </material>
+
+    <material name="amr_caster_color">
+        <color rgba="0.00 0.46 0.71 1.0"/> <!-- Electric Blue Caster Wheel-->
+    </material>
+
+    <material name="transparent">
+        <color rgba="0.00 0.65 0.58 0.1"/> <!-- Teal -->
+    </material>
+
+                    <!-- INTERIA XACRO MACRO -->
+    <!-- BODY INTERIA -->                
+    <xacro:macro name="box_inertia" params="m l w h xyz rpy" >
+        <inertial>
+            <origin xyz="${xyz}" rpy="${rpy}" />
+            <mass value="${m}" />
+            <inertia ixx="${(m/12) * (h*h + w*w)}" ixy="0" ixz="0"
+                     iyy="${(m/12) * (h*h + l*l)}" iyz="0"
+                     izz="${(m/12) * (w*w + l*l)}" />           
+        </inertial>
+    </xacro:macro>
+    
+    <!-- WHEEL INTERIA -->
+    <xacro:macro name="cylinder_inertia" params="m r h xyz rpy" >
+        <inertial>
+            <origin xyz="${xyz}" rpy="${rpy}" />
+            <mass value="${m}" />
+            <inertia ixx="${(m/12) * (3*r*r + h*h)}" ixy="0" ixz="0"
+                     iyy="${(m/2) * (r*r)}"
+                     izz="${(m/12) * (3*r*r + h*h)}" iyz="0" />           
+        </inertial>
+    </xacro:macro>
+
+    <!-- CASTER WHEEL MACRO --> 
+    <xacro:macro name="sphere_inertia" params="m r o_xyz o_rpy">
+        <inertial>
+            <mass value="${m}" />
+            <origin xyz="${o_xyz}" rpy="${o_rpy}" />
+            
+            <inertia ixx="${(2*m*r*r)/5}" ixy="0" ixz="0" 
+                     iyy="${(2*m*r*r)/5}" iyz="0"
+                     izz="${(2*m*r*r)/5}" />
+        </inertial>
+    </xacro:macro>
+
+</robot>

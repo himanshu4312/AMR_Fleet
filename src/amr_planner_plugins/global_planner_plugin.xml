@@ -1,0 +1,11 @@
+<library path="amr_planner_plugins">
+  <class name="amr_planner_plugins/AStarPlanner" type="amr_planner_plugins::AStarPlanner" base_class_type="nav2_core::GlobalPlanner">
+    <description>Custom A* global planner: 8-connected grid search with costmap-aware edge weights.</description>
+  </class>
+  <class name="amr_planner_plugins/DijkstraPlanner" type="amr_planner_plugins::DijkstraPlanner" base_class_type="nav2_core::GlobalPlanner">
+    <description>Custom Dijkstra global planner: same 8-connected grid search as AStarPlanner with the heuristic zeroed out.</description>
+  </class>
+  <class name="amr_planner_plugins/RRTPlanner" type="amr_planner_plugins::RRTPlanner" base_class_type="nav2_core::GlobalPlanner">
+    <description>Custom goal-biased RRT global planner: continuous-space random sampling with straight-line costmap collision checking.</description>
+  </class>
+</library>
