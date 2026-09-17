@@ -9,17 +9,26 @@ from nav2_msgs.msg import SpeedLimit
 
 from amr_fleet_msgs.msg import FleetRobotState
 
-DEFAULT_ROBOT_NAMES = ['robot1', 'robot2']
+DEFAULT_ROBOT_NAMES = ['robot1', 'robot2', 'robot3', 'robot4']
+
+# _update_conflicts already checks every pair of robots (not just a single
+# fixed pair), so no logic changes were needed to go from 2 to 4 robots -
+# only this list and the spawn poses in multi_robot_bringup.launch.py.
 
 # nav2_params.yaml sets costmap robot_radius: 0.22m for both robots ->
-# footprint diameter 0.44m. Default safety distance = diameter + ~0.56m
-# margin (AMCL localization noise + reaction time), rounded to 1.0m.
-DEFAULT_SAFETY_DISTANCE_M = 1.0
+# footprint (touching) diameter 0.44m. Safety distance = diameter + ~0.16m
+# margin (AMCL localization noise + reaction time), rounded to 0.6m.
+# Tightened down from an initial 1.0m default, which was triggering pauses
+# while robots were still ~3.5m apart - much earlier than "stop when it's
+# actually close".
+DEFAULT_SAFETY_DISTANCE_M = 0.6
 
 # Two robots' estimated arrival times at the same close point must be within
 # this many seconds of each other, IN ADDITION to being spatially close, to
 # count as a real conflict. See the comment in _pair_has_conflict for why.
-DEFAULT_TIME_WINDOW_S = 7.0
+# Tightened from an initial 7.0s so the fleet manager only reacts to
+# genuinely imminent overlaps, not speculative far-future ones.
+DEFAULT_TIME_WINDOW_S = 4.0
 
 # Nominal cruise speed used only to estimate arrival times, matching
 # controller_server.FollowPath.max_vel_x in nav2_params.yaml (currently

@@ -26,13 +26,18 @@ from launch_ros.descriptions import ParameterFile
 from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
 
-# Two spawn poses inside src/amr_description/world/maze.sdf, chosen by
-# scanning maps/maze_map_v3.yaml for cells with >2m clearance from the
-# nearest wall/obstacle: robot1 sits in the open room near the top-left of
-# the maze, robot2 in the open room near the bottom-right, ~32m apart.
+# Spawn poses inside src/amr_description/world/maze.sdf, chosen by scanning
+# maps/maze_map_v3.yaml for cells with clearance from the nearest
+# wall/obstacle, each >6m from every other robot's spawn: robot1 sits in the
+# open room near the top-left of the maze (~2m+ clearance), robot2 in the
+# open room near the bottom-right (~2m+ clearance), robot3 and robot4 in two
+# separate clear rooms near the middle-right of the maze (~2m clearance
+# each), all four >7.5m apart from one another.
 ROBOTS = [
     {'name': 'robot1', 'x': '-12.2', 'y': '9.95', 'yaw': '0.0'},
     {'name': 'robot2', 'x': '2.65', 'y': '-13.3', 'yaw': '0.0'},
+    {'name': 'robot3', 'x': '3.90', 'y': '5.25', 'yaw': '0.0'},
+    {'name': 'robot4', 'x': '3.90', 'y': '-5.85', 'yaw': '0.0'},
 ]
 
 WORLD_NAME = 'empty'  # <world name='empty'> in maze.sdf

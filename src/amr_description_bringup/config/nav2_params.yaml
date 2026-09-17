@@ -288,8 +288,8 @@ planner_server:
     GridBased:
       #plugin: "nav2_navfn_planner/NavfnPlanner"
       #plugin: "amr_planner_plugins/AStarPlanner"
-      #plugin: "amr_planner_plugins/DijkstraPlanner"
-      plugin: "amr_planner_plugins/RRTPlanner"
+      plugin: "amr_planner_plugins/DijkstraPlanner"
+      #plugin: "amr_planner_plugins/RRTPlanner"
       allow_unknown: true
       cost_weight: 0.8
     DijkstraGridBased:

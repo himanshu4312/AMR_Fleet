@@ -34,9 +34,9 @@ AMR_Fleet/
 │   │   │   ├── amr_bringup.launch.py       # single-robot bringup (unmodified, still works as-is)
 │   │   │   ├── nav2_bringup.launch.py      # single-robot Nav2 only (unmodified)
 │   │   │   ├── slam.launch.py              # SLAM mapping (unmodified)
-│   │   │   └── multi_robot_bringup.launch.py  # two robots, one world, two Nav2 stacks, RViz, TF relay
-│   │   ├── rviz/multi_robot_rviz_config.rviz  # both robots + both plans + per-robot goal/pose-estimate buttons
-│   │   ├── scripts/tf_merge_relay.py          # mirrors both robots' TF onto shared /tf for RViz
+│   │   │   └── multi_robot_bringup.launch.py  # up to 4 robots, one world, one Nav2 stack each, RViz, TF relay
+│   │   ├── rviz/multi_robot_rviz_config.rviz  # every robot + its plan + per-robot goal/pose-estimate buttons
+│   │   ├── scripts/tf_merge_relay.py          # mirrors every robot's TF onto shared /tf for RViz
 │   │   └── config/nav2_params.yaml            # shared Nav2 params (per-robot frames/topics rewritten at launch)
 │   ├── amr_planner_plugins/        # custom Nav2 planner plugins (unmodified)
 │   ├── amr_fleet_msgs/             # custom interfaces shared across the fleet
@@ -186,15 +186,59 @@ robot's `bt_navigator`/`amcl`. The pose-estimate buttons are not needed for
 normal runs (AMCL is auto-seeded with the correct spawn pose at launch) —
 only useful if a robot's localization ever visibly drifts.
 
+### Step 4 — deterministic planner, tighter stopping distance, scale to 4 robots (validated)
+
+**Global planner switch**: `amr_planner_plugins/RRTPlanner` (the `GridBased`
+planner Nav2 actually uses) is a randomized algorithm with no fixed seed -
+every replan (roughly once a second) sampled a fresh random tree and
+returned a visibly different, jagged path each time, even for the identical
+start/goal. Switched `GridBased` to `amr_planner_plugins/DijkstraPlanner`
+(`nav2_params.yaml`, one line) - already a complete, registered
+implementation (8-connected priority-queue search, deterministic, provably
+optimal). Confirmed the fix by sampling `remaining_path_length` across
+ticks: it now decreases in clean monotonic steps instead of jumping around
+(`23.9 → 25.27 → 24.57` under RRT vs. `19.91 → 19.91 → 19.40 → 19.40` under
+Dijkstra). As a side effect, this also fixed the Step 3 conflict-flickering
+finding - a stable path shape no longer randomly flips the spatial+time
+check in and out of threshold, so a genuine head-on encounter (retracing the
+same swap route in reverse) now produces **one clean 13-second pause
+episode** instead of 21 short flickering ones, confirmed via `/robot2/odom`
+showing ~0 velocity throughout.
+
+**Tighter stopping distance**: `safety_distance_m` reduced `1.0m → 0.6m`
+and `time_window_s` reduced `7.0s → 4.0s` in `fleet_manager_node.py`, so the
+fleet manager only reacts to genuinely close, imminent encounters instead of
+pausing robots while still ~3.5m apart.
+
+**Scaled to 4 robots**: added `robot3` (spawn `3.90, 5.25`) and `robot4`
+(spawn `3.90, -5.85`), both >2m wall clearance and >7.5m from every other
+robot's spawn. No conflict-detection logic changes were needed - it already
+iterates over every robot pair, not a fixed pair - only the robot list and
+spawn poses. Added matching RViz `RobotModel`/`Path`/goal-pose/pose-estimate
+entries for both. Validated: all 4 correctly localized at their exact
+spawns, and the conflict detector correctly picked the one genuinely
+conflicting pair (`robot3`/`robot4`) out of all 6 possible pairs while
+ignoring the other 5.
+
+**A resource-contention finding, not a code bug**: sending all 4 robots a
+goal at the exact same instant caused `robot3`'s first attempt to fail -
+`behavior_server`'s recovery-action servers timed out acknowledging a
+request during the simultaneous startup burst (system load spiked to ~9.7
+on the dev sandbox this was tested on). That cascaded: since `robot3` never
+left its spawn, `robot4`'s goal - which was exactly `robot3`'s spawn point -
+was correctly rejected as "occupied by a lethal obstacle" (another robot
+was physically standing there). Retrying both a few seconds later, once the
+startup burst settled, succeeded cleanly. Four concurrent full Nav2 stacks
+is close to or beyond this sandbox's real-time ceiling for a synchronized
+cold start; on less constrained hardware, or by staggering goal sends
+slightly instead of firing all 4 at once, this likely won't occur.
+
 ## What's required to do next
 
-- [ ] Investigate/tune the conflict-flickering behavior found in Step 3
-      (e.g. hysteresis so a cleared conflict doesn't immediately re-open, or
-      a minimum episode duration) - only if it turns out to matter in
-      practice.
-- [ ] Scale from 2 to 3-4 robots once the above is settled.
 - [ ] Anything beyond observability for `FleetRobotState` (currently nothing
       subscribes to it) if a use for it emerges.
+- [ ] If resource contention recurs on your hardware with 4 robots, consider
+      staggering simultaneous goal sends rather than firing all at once.
 
 ## Build instructions
 
@@ -216,7 +260,7 @@ ros2 launch amr_description_bringup multi_robot_bringup.launch.py
 Useful launch arguments:
 
 ```bash
-# no Gazebo GUI (server + offscreen sensor rendering only) - use if two
+# no Gazebo GUI (server + offscreen sensor rendering only) - use if four
 # robots' worth of Nav2 + rendering is too heavy to run in real time
 ros2 launch amr_description_bringup multi_robot_bringup.launch.py headless:=true
 
@@ -224,9 +268,13 @@ ros2 launch amr_description_bringup multi_robot_bringup.launch.py headless:=true
 ros2 launch amr_description_bringup multi_robot_bringup.launch.py use_rviz:=false
 ```
 
-Watch the terminal for five separate `Managed nodes are active` lines
-(map_server, robot1 localization, robot1 navigation, robot2 localization,
-robot2 navigation) before doing anything else.
+Watch the terminal for nine separate `Managed nodes are active` lines
+(map_server, then localization + navigation for each of the four robots)
+before doing anything else. If you see fewer, something didn't finish
+starting - check for `Failed to change state`/`Failed to bring up` errors,
+which usually mean the system was too loaded during startup (see the Step 4
+resource-contention note above); waiting and retrying the affected robot's
+goal once things settle usually resolves it.
 
 If Gazebo is already running without RViz, attach RViz to it separately:
 
@@ -246,12 +294,15 @@ signal that coordination is actually working.
 
 ### 3. Send goals
 
-**Via RViz**: click the **"2D Goal Pose (robot1)"** or
-**"2D Goal Pose (robot2)"** toolbar button, then click-and-drag on the map at
-the target position/heading. Each button only ever targets its own robot;
-send one at a time, one robot at a time.
+**Via RViz**: click the **"2D Goal Pose (robotN)"** toolbar button for
+whichever robot you want (one button each for robot1-robot4), then
+click-and-drag on the map at the target position/heading. Each button only
+ever targets its own robot; send one at a time, one robot at a time - there's
+no way to queue multiple robots from a single click.
 
-**Via CLI** (run concurrently so both robots move at once):
+**Via CLI** - one `send_goal` per robot, run concurrently (background them
+with `&`, or use separate terminals) if you want multiple robots moving at
+once:
 
 ```bash
 ros2 action send_goal /robot1/navigate_to_pose nav2_msgs/action/NavigateToPose \
@@ -263,8 +314,21 @@ ros2 action send_goal /robot2/navigate_to_pose nav2_msgs/action/NavigateToPose \
   "{pose: {header: {frame_id: 'map'}, pose: {position: {x: -12.2, y: 9.95, z: 0.0}, orientation: {z: 0.8770, w: 0.4805}}}}"
 ```
 
-(the pair above is a full spawn-to-spawn swap, guaranteed to cross paths -
-useful specifically for testing conflict detection)
+```bash
+ros2 action send_goal /robot3/navigate_to_pose nav2_msgs/action/NavigateToPose \
+  "{pose: {header: {frame_id: 'map'}, pose: {position: {x: 3.90, y: -5.85, z: 0.0}, orientation: {z: -0.7071, w: 0.7071}}}}"
+```
+
+```bash
+ros2 action send_goal /robot4/navigate_to_pose nav2_msgs/action/NavigateToPose \
+  "{pose: {header: {frame_id: 'map'}, pose: {position: {x: 3.90, y: 5.25, z: 0.0}, orientation: {z: 0.7071, w: 0.7071}}}}"
+```
+
+(robot1/robot2 above is a full spawn-to-spawn swap and robot3/robot4 above
+is another, each guaranteed to cross paths within its own pair - useful
+specifically for testing conflict detection. If sending all four at once,
+see the Step 4 resource-contention note - staggering them by a second or two
+avoids the simultaneous-startup timeout that was observed there.)
 
 ### 4. Checks along the way
 
@@ -272,6 +336,8 @@ useful specifically for testing conflict detection)
 # each robot's localized pose
 ros2 topic echo /robot1/amcl_pose --once
 ros2 topic echo /robot2/amcl_pose --once
+ros2 topic echo /robot3/amcl_pose --once
+ros2 topic echo /robot4/amcl_pose --once
 
 # confirm the fleet manager is actually wired to controller_server
 ros2 topic info /robot1/speed_limit -v
@@ -279,7 +345,7 @@ ros2 topic info /robot1/speed_limit -v
 # confirm a pause is real, not just a log line (check during an active episode)
 ros2 topic echo /robot1/odom --once   # twist.twist.linear.x should be ~0 if paused
 
-# fleet manager's observability view of both robots
+# fleet manager's observability view of every robot
 ros2 topic echo /fleet_manager/robot_states
 ```
 

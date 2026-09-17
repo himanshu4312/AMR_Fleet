@@ -34,7 +34,7 @@ def make_relay(node: Node, robot_name: str, src_topic: str, dst_topic: str, tran
 def main():
     rclpy.init()
     node = Node('tf_merge_relay')
-    for robot_name in ('robot1', 'robot2'):
+    for robot_name in ('robot1', 'robot2', 'robot3', 'robot4'):
         make_relay(node, robot_name, f'/{robot_name}/tf', '/tf', transient_local=False)
         make_relay(node, robot_name, f'/{robot_name}/tf_static', '/tf_static', transient_local=True)
     rclpy.spin(node)
