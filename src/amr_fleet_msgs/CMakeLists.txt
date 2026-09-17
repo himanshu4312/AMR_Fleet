@@ -7,19 +7,16 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
-# No .msg/.srv files yet -- this list will be populated in a later step.
 set(msg_files
+  "msg/FleetRobotState.msg"
 )
 
-# Skipped for now since msg_files is empty -- rosidl_generate_interfaces()
-# errors out if called with no interface files. This will start generating
-# interfaces automatically once .msg/.srv files are added above.
-if(msg_files)
-  rosidl_generate_interfaces(${PROJECT_NAME}
-    ${msg_files}
-  )
-endif()
+rosidl_generate_interfaces(${PROJECT_NAME}
+  ${msg_files}
+  DEPENDENCIES geometry_msgs
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
