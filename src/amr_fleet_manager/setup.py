@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'fleet_manager_node = amr_fleet_manager.fleet_manager_node:main'
+            'fleet_manager_node = amr_fleet_manager.fleet_manager_node:main',
+            'fleet_watchdog_node = amr_fleet_manager.fleet_watchdog_node:main',
         ],
     },
 )

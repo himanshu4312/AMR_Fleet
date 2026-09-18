@@ -169,7 +169,13 @@ controller_server:
       short_circuit_trajectory_evaluation: True
       stateful: True
       critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
-      BaseObstacle.scale: 0.02
+      # Was 0.02 - ~1600x smaller than PathAlign/PathDist/GoalDist/RotateToGoal
+      # (32.0/32.0/24.0/32.0 below), meaning obstacle proximity had almost no
+      # influence on which candidate trajectory DWB picked: a trajectory that
+      # grazed a wall or another robot scored barely worse than one that
+      # didn't. Raised so obstacle avoidance actually competes with path-
+      # tracking in the trajectory scoring instead of being a rounding error.
+      BaseObstacle.scale: 0.5
       PathAlign.scale: 32.0
       PathAlign.forward_point_distance: 0.1
       GoalAlign.scale: 24.0
@@ -197,7 +203,13 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.55
+        # Was 0.55 - widened for more margin from walls/other robots given
+        # BaseObstacle.scale is now actually weighted (see FollowPath
+        # above). Still a soft cost gradient, not a hard wall, so this does
+        # not block any previously-passable corridor - it just makes the
+        # planner/controller prefer staying further from obstacles when
+        # there's room to.
+        inflation_radius: 0.7
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
@@ -256,7 +268,9 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.55
+        # Was 0.55 - see the matching comment on local_costmap's
+        # inflation_layer above for why.
+        inflation_radius: 0.7
       always_send_full_costmap: True
 
 map_server:

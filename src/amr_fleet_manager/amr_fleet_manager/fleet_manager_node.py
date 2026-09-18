@@ -6,6 +6,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from nav_msgs.msg import Path
 from nav2_msgs.msg import SpeedLimit
+from std_msgs.msg import Empty
 
 from amr_fleet_msgs.msg import FleetRobotState
 
@@ -21,14 +22,14 @@ DEFAULT_ROBOT_NAMES = ['robot1', 'robot2', 'robot3', 'robot4']
 # Tightened down from an initial 1.0m default, which was triggering pauses
 # while robots were still ~3.5m apart - much earlier than "stop when it's
 # actually close".
-DEFAULT_SAFETY_DISTANCE_M = 0.6
+DEFAULT_SAFETY_DISTANCE_M = 2
 
 # Two robots' estimated arrival times at the same close point must be within
 # this many seconds of each other, IN ADDITION to being spatially close, to
 # count as a real conflict. See the comment in _pair_has_conflict for why.
 # Tightened from an initial 7.0s so the fleet manager only reacts to
 # genuinely imminent overlaps, not speculative far-future ones.
-DEFAULT_TIME_WINDOW_S = 4.0
+DEFAULT_TIME_WINDOW_S = 7.0
 
 # Nominal cruise speed used only to estimate arrival times, matching
 # controller_server.FollowPath.max_vel_x in nav2_params.yaml (currently
@@ -41,6 +42,24 @@ DEFAULT_NOMINAL_SPEED_MPS = 0.26
 DEFAULT_PATH_CHECK_STRIDE = 1
 
 TIMER_PERIOD_S = 0.5  # ~2 Hz conflict-detection poll rate
+
+# How old a robot's LAST-RECEIVED /<name>/amcl_pose is allowed to get before
+# that robot is treated as "unknown" rather than trusted. Deliberately based
+# on pose age, not /plan age: /plan stops updating the moment a robot
+# finishes navigating to its goal and has nothing queued next - that is a
+# normal, safe, terminal state, not a failure, so plan staleness alone must
+# never be treated as "something is wrong". Pose, on the other hand, should
+# keep arriving as long as the robot's localization is alive at all, so a
+# long pose gap is a much more honest "I haven't heard from this robot"
+# signal. 5.0s is generous relative to AMCL's own update cadence (avoids
+# false "stale" flags on a robot that's just sitting still) while still
+# being short enough to catch a genuinely dead/crashed robot within a few
+# seconds. See _track_is_fresh and the fail-safe handling in
+# _update_conflicts for how this is actually used - staleness can only ever
+# PREVENT clearing an existing pause, never CAUSE one.
+MAX_POSE_AGE_S = 5.0
+
+HEARTBEAT_TOPIC = '/fleet_manager/heartbeat'
 
 # SpeedLimit.msg defines speed_limit=0.0 (with percentage=True) as "no
 # limit" - i.e. the CLEAR/resume value, not "stop". A paused robot is
@@ -114,7 +133,8 @@ class RobotTrack:
 
     def __init__(self, name):
         self.name = name
-        self.pose = None       # geometry_msgs/PoseStamped, from /<name>/amcl_pose
+        self.pose = None            # geometry_msgs/PoseStamped, from /<name>/amcl_pose
+        self.pose_received_at = None  # rclpy.time.Time this node received that pose, for staleness checks
         self.points = []       # list[(x, y)], from latest /<name>/plan
         self.cumulative = []   # cumulative path distance up to points[i], same length as points
 
@@ -144,12 +164,14 @@ class FleetManagerNode(Node):
         self.declare_parameter('time_window_s', DEFAULT_TIME_WINDOW_S)
         self.declare_parameter('nominal_speed_mps', DEFAULT_NOMINAL_SPEED_MPS)
         self.declare_parameter('path_check_stride', DEFAULT_PATH_CHECK_STRIDE)
+        self.declare_parameter('max_pose_age_s', MAX_POSE_AGE_S)
 
         self.robot_names = list(self.get_parameter('robot_names').value)
         self.safety_distance_m = float(self.get_parameter('safety_distance_m').value)
         self.time_window_s = float(self.get_parameter('time_window_s').value)
         self.nominal_speed_mps = float(self.get_parameter('nominal_speed_mps').value)
         self.path_check_stride = max(1, int(self.get_parameter('path_check_stride').value))
+        self.max_pose_age_s = float(self.get_parameter('max_pose_age_s').value)
 
         self.tracks = {name: RobotTrack(name) for name in self.robot_names}
 
@@ -171,6 +193,12 @@ class FleetManagerNode(Node):
 
         self.state_pub = self.create_publisher(FleetRobotState, '/fleet_manager/robot_states', 10)
 
+        # A separate fleet_watchdog_node listens on this topic. This node
+        # cannot detect its OWN death, so the watchdog has to be a different
+        # process - see fleet_watchdog_node.py for what happens when this
+        # heartbeat stops.
+        self.heartbeat_pub = self.create_publisher(Empty, HEARTBEAT_TOPIC, 10)
+
         # Explicitly clear every robot's speed limit at startup so nobody is
         # left paused from a previous fleet_manager run.
         for name in self.robot_names:
@@ -181,7 +209,8 @@ class FleetManagerNode(Node):
             f'fleet_manager watching {self.robot_names}: '
             f'safety_distance={self.safety_distance_m}m, '
             f'time_window={self.time_window_s}s, '
-            f'nominal_speed={self.nominal_speed_mps}m/s')
+            f'nominal_speed={self.nominal_speed_mps}m/s, '
+            f'max_pose_age={self.max_pose_age_s}s')
 
     # --- subscriptions -----------------------------------------------------
 
@@ -195,14 +224,24 @@ class FleetManagerNode(Node):
             pose = PoseStamped()
             pose.header = msg.header
             pose.pose = msg.pose.pose
-            self.tracks[name].pose = pose
+            track = self.tracks[name]
+            track.pose = pose
+            track.pose_received_at = self.get_clock().now()
         return cb
 
     # --- main loop -----------------------------------------------------
 
     def on_timer(self):
+        self.heartbeat_pub.publish(Empty())
         self._update_conflicts()
         self._publish_states()
+
+    def _track_is_fresh(self, track: RobotTrack) -> bool:
+        """True if we've heard this robot's pose recently enough to trust it."""
+        if track.pose_received_at is None:
+            return False
+        age_s = (self.get_clock().now() - track.pose_received_at).nanoseconds / 1e9
+        return age_s <= self.max_pose_age_s
 
     def _update_conflicts(self):
         names = self.robot_names
@@ -210,10 +249,27 @@ class FleetManagerNode(Node):
             for j in range(i + 1, len(names)):
                 a, b = names[i], names[j]
                 pair_key = tuple(sorted((a, b)))
-                conflict_now = self._pair_has_conflict(a, b)
+
+                # Fail-safe: only trust a "no conflict" result when BOTH
+                # robots' pose data is fresh. If either has gone stale (dead
+                # AMCL, crashed nav stack, network partition, ...) we cannot
+                # honestly claim to know it is safe, so conflict_now is
+                # forced False for the purposes of ever STARTING a new
+                # episode, but staleness must never be the reason an
+                # EXISTING pause gets cleared - see the branch below.
+                both_fresh = self._track_is_fresh(self.tracks[a]) and self._track_is_fresh(self.tracks[b])
+                conflict_now = both_fresh and self._pair_has_conflict(a, b)
 
                 if pair_key in self.active_conflicts:
-                    if not conflict_now:
+                    if not both_fresh:
+                        # Unknown is not the same as safe: keep whoever is
+                        # paused, paused, until fresh data proves otherwise.
+                        self.get_logger().warn(
+                            f'{a} or {b} has stale pose data during an active conflict - '
+                            f'keeping {self.active_conflicts[pair_key]} paused as a fail-safe '
+                            f'until fresh data confirms it is actually clear.',
+                            throttle_duration_sec=5.0)
+                    elif not conflict_now:
                         paused_robot = self.active_conflicts.pop(pair_key)
                         self.get_logger().info(
                             f'Conflict cleared between {a} and {b}; resuming {paused_robot}')
@@ -311,6 +367,12 @@ class FleetManagerNode(Node):
             if track.pose is None:
                 continue
             msg = FleetRobotState()
+            # Reuse the source amcl_pose's own header: it's already
+            # sim-time-correct and in the "map" frame, and represents when
+            # this pose was actually true - exactly what a consumer wants
+            # for judging staleness, as opposed to "when was this
+            # FleetRobotState message published" which header.stamp is NOT.
+            msg.header = track.pose.header
             msg.robot_name = name
             msg.pose = track.pose
             msg.remaining_path_length = track.remaining_path_length

@@ -233,8 +233,70 @@ is close to or beyond this sandbox's real-time ceiling for a synchronized
 cold start; on less constrained hardware, or by staggering goal sends
 slightly instead of firing all 4 at once, this likely won't occur.
 
+### Step 5 — robustness audit: watchdog, staleness fail-safe, obstacle-avoidance tuning (validated)
+
+A brutal, evidence-based audit of the whole system (read every package, checked
+what's actually tested vs. just claimed) surfaced several real gaps between
+this project and "industrial" reliability standards. Addressed the three
+most consequential ones:
+
+- **No watchdog for `fleet_manager_node` dying.** Verified by reading the
+  code: the *only* thing that ever clears a paused robot's `speed_limit` is
+  `fleet_manager_node`'s own timer. If that process crashes while a robot is
+  paused, nothing else would ever unpause it. Added `fleet_watchdog_node.py`
+  - a separate, deliberately minimal process (it can't watch itself die) that
+  watches a heartbeat `fleet_manager_node` now publishes every tick on
+  `/fleet_manager/heartbeat`. If the heartbeat goes stale, it force-publishes
+  resume to every robot and logs loudly until the heartbeat returns.
+  Live-tested by actually killing `fleet_manager_node` mid-run: confirmed the
+  watchdog tripped within its timeout, held `robot1`'s `speed_limit` at `0.0`
+  (not stuck), and handed control back cleanly the moment `fleet_manager_node`
+  was restarted.
+- **Stale data trusted indefinitely.** `_plan_callback`/`_pose_callback` had
+  no staleness concept at all - a robot whose localization died would keep
+  being reasoned about using its last-known data forever. Added pose-age
+  tracking (`max_pose_age_s`, default 5.0s) - deliberately based on
+  `/amcl_pose` age, not `/plan` age, since `/plan` normally stops updating
+  the moment a robot finishes navigating and has nothing queued, which is a
+  safe terminal state, not a failure. The fail-safe rule: stale data can
+  **prevent** clearing an existing pause but can **never cause** one -
+  "unknown" must never be treated as "safe". Verified with 4 targeted tests
+  (real conflict pauses correctly; staleness mid-conflict does NOT clear the
+  pause; fresh data proving genuinely clear DOES clear it; a never-localized
+  robot can't trigger a new conflict at all).
+- **`BaseObstacle.scale: 0.02`** in `nav2_params.yaml` was ~1600x smaller
+  than the path-tracking critics (`32.0`), meaning obstacle proximity had
+  almost no influence on which trajectory DWB picked. Raised to `0.5` and
+  widened `inflation_radius` `0.55m → 0.7m` (both costmaps) so a robot
+  actually steers away from anything its lidar detects - walls or other
+  robots - instead of just barely avoiding literal contact. Left
+  `robot_radius` (0.22m, notably smaller than the real 1.25m x 0.9m body)
+  untouched for now - correcting it properly risks making some of this
+  maze's tighter corridors (many only 0.25-0.6m clearance) impassable, so
+  that fix needs a deliberate, separate pass rather than a quick tuning
+  change.
+
+Remaining audit findings not yet addressed (robot fleet config duplicated
+across 3 files with no single source of truth, no automated tests for the
+conflict-detection logic itself - only ad-hoc validation each session, no
+CI, no containerization, the footprint-size mismatch above) are tracked
+below.
+
 ## What's required to do next
 
+- [ ] Single source of truth for the robot fleet (name/spawn pose list is
+      currently duplicated across `multi_robot_bringup.launch.py`,
+      `tf_merge_relay.py`, and `fleet_manager_node.py`).
+- [ ] Commit the conflict-detection test cases (segment-distance geometry,
+      time-window logic, staleness fail-safe, priority-episode locking) as
+      real `pytest` tests instead of re-running them ad-hoc each session.
+- [ ] Decide on and implement a real footprint fix (robot_radius is 0.22m
+      vs. an actual 1.25m x 0.9m body) - either a proper rectangular
+      footprint or a smaller partial correction; needs corridor-width
+      re-validation either way.
+- [ ] CI (GitHub Actions build/test) and containerization (Dockerfile) -
+      currently every regression in this project has been caught by manual,
+      interactive testing only.
 - [ ] Anything beyond observability for `FleetRobotState` (currently nothing
       subscribes to it) if a use for it emerges.
 - [ ] If resource contention recurs on your hardware with 4 robots, consider
@@ -282,15 +344,23 @@ If Gazebo is already running without RViz, attach RViz to it separately:
 ros2 run rviz2 rviz2 -d install/amr_description_bringup/share/amr_description_bringup/rviz/multi_robot_rviz_config.rviz --ros-args -p use_sim_time:=true
 ```
 
-### 2. Start the fleet manager (separate terminal)
+### 2. Start the fleet manager and its watchdog (two separate terminals)
 
 ```bash
 ros2 run amr_fleet_manager fleet_manager_node
 ```
+```bash
+ros2 run amr_fleet_manager fleet_watchdog_node
+```
 
-Watch this terminal for `Conflict detected between ... : pausing ...` /
-`Conflict cleared ...` lines while robots are navigating - this is the main
-signal that coordination is actually working.
+Watch the fleet manager terminal for `Conflict detected between ... :
+pausing ...` / `Conflict cleared ...` lines while robots are navigating -
+this is the main signal that coordination is actually working. The watchdog
+should stay quiet (just its one startup line) unless `fleet_manager_node`
+itself stops responding - if you ever see it log `fleet manager heartbeat
+lost`, that means `fleet_manager_node` died or froze and the watchdog has
+force-cleared every robot's speed limit as a fail-safe; restart
+`fleet_manager_node` to get coordination back.
 
 ### 3. Send goals
 
